@@ -24,7 +24,9 @@
  * npx `.cmd` shim and no shell), the same resolve-your-own-toolchain approach
  * build:dist uses for tsc (#437): esbuild installs into npm's cache, never the
  * project tree, so this adds no dependency and works under a from-source
- * `--omit=dev` install where project devDeps are absent.
+ * `--omit=dev` install where project devDeps are absent. This relies on npm's
+ * `exec --package` syntax; pi always installs via npm so the shipping path is
+ * npm. A non-npm `npm_execpath` (pnpm/yarn/bun) is rejected with a clear error.
  *
  * USAGE
  *   node scripts/bundle-dist.mjs   # invoked by `npm run bundle:dist`
@@ -59,8 +61,15 @@ const REQUIRE_BANNER =
 // npm's own CLI, set by npm when it runs this via `npm run bundle:dist`. Running
 // esbuild through `node <npm-cli> exec` (rather than the `npx`/`npx.cmd` shim)
 // keeps the spawn shell-free and cross-platform, so args are never re-parsed by
-// a shell.
+// a shell. This uses npm's `exec --package` syntax specifically; pnpm/yarn/bun
+// expose a different exec/dlx surface, so the invocation is intentionally
+// npm-only (pi always installs via npm, so the shipping path is npm) and we
+// reject a non-npm `npm_execpath` with a clear message rather than passing
+// npm flags to another package manager's CLI.
 const npmCli = process.env.npm_execpath;
+const isNpmCli = npmCli
+	? /npm-cli\.js$|(^|[\\/])npm(\.js)?$/.test(npmCli)
+	: false;
 
 if (!existsSync(distEntry)) {
 	console.error(
@@ -70,6 +79,13 @@ if (!existsSync(distEntry)) {
 }
 if (!npmCli) {
 	console.error("[bundle] npm_execpath unset — run via `npm run bundle:dist`.");
+	process.exit(1);
+}
+if (!isNpmCli) {
+	console.error(
+		`[bundle] npm_execpath is not npm (${npmCli}) — this step uses npm's ` +
+			"`exec --package` syntax. Run `npm run bundle:dist` with npm.",
+	);
 	process.exit(1);
 }
 

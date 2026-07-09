@@ -91,6 +91,64 @@ describe("published package entry points (dist mode, #182)", () => {
 			"postinstall was removed — grammars ship bundled + lazy-fetch",
 		).toBeUndefined();
 	});
+
+	it("wires the bundle step into build:dist after tsc (#335)", () => {
+		const bd = pkg.scripts?.["build:dist"] ?? "";
+		// tsc must run before the bundle (bundle collapses the tsc emit).
+		expect(bd).toContain("bundle:dist");
+		expect(bd.indexOf("tsconfig.dist.json")).toBeLessThan(
+			bd.indexOf("bundle:dist"),
+		);
+		expect(pkg.scripts?.["bundle:dist"] ?? "").toContain("bundle-dist.mjs");
+	});
+});
+
+// Guards the #335 bundle CONTRACT against the built entry: pi's Bun-compiled
+// host cannot resolve a bare specifier from the extension's node_modules, so the
+// bundle must inline the pure-JS deps and keep only host-provided + native/wasm
+// packages external. dist/ is gitignored, so this only runs post-build (CI runs
+// build:dist before the suite); a source-only checkout skips it.
+describe("bundled dist entry shape (#335)", () => {
+	const distEntry = path.join(root, "dist", "index.js");
+	const built = fs.existsSync(distEntry);
+	const src = built ? fs.readFileSync(distEntry, "utf8") : "";
+
+	it.runIf(built)("inlines the pure-JS deps (no bare import at load)", () => {
+		for (const dep of ["minimatch", "js-yaml", "vscode-jsonrpc"]) {
+			const bareImport = src.includes(`from "${dep}"`);
+			const bareRequire =
+				src.includes(`require("${dep}")`) || src.includes(`require('${dep}')`);
+			expect(
+				bareImport || bareRequire,
+				`${dep} must be inlined, not bare-imported`,
+			).toBe(false);
+		}
+	});
+
+	it.runIf(built)("keeps host-provided packages external", () => {
+		for (const dep of ["typebox", "@earendil-works/pi-tui"]) {
+			expect(
+				src.includes(`from "${dep}"`),
+				`${dep} must stay an external import`,
+			).toBe(true);
+		}
+	});
+
+	it.runIf(built)(
+		"resolves native/wasm via file:// URL, not a bare specifier",
+		() => {
+			// A raw absolute path is not a valid Windows import specifier; both lazy
+			// accessors must convert the createRequire-resolved path via
+			// pathToFileURL before dynamic-importing. web-tree-sitter's exports map
+			// has only the `.` entry, so the bare package name is resolved (never a
+			// custom subpath). esbuild suffixes the require var (_require2 etc.), so
+			// match the .resolve(<pkg>) call shape rather than the exact var name.
+			expect(src).toMatch(/\.resolve\("@ast-grep\/napi"\)/);
+			expect(src).toMatch(/\.resolve\("web-tree-sitter"\)/);
+			expect(src).not.toContain('.resolve("web-tree-sitter/tree-sitter');
+			expect(src).toContain("pathToFileURL");
+		},
+	);
 });
 
 describe("tsconfig.dist.json", () => {
