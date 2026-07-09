@@ -28,3 +28,25 @@ export function replaceTable(
   sep: string,
   rows: string[][],
 ): string | null;
+
+export function reshapeRowsByName(
+  priorRows: string[][],
+  priorHeader: string[],
+  newHeader: string[],
+  keyCol: string,
+  placeholder?: string,
+): string[][];
+
+export function parseBulletSection(text: string, heading: string): Map<string, string>;
+
+export function mergeBulletSection(
+  newText: string,
+  heading: string,
+  priorBullets: Map<string, string>,
+  keysToCarry: string[],
+): string;
+
+export function mergeServerCapabilitiesDoc(
+  priorText: string,
+  freshText: string,
+): { text: string; preservedCount: number };

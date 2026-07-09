@@ -21,7 +21,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { mergeRows, parseTable, replaceTable } from "./lib/md-matrix.mjs";
+import { mergeServerCapabilitiesDoc } from "./lib/md-matrix.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const argv = process.argv.slice(2);
@@ -197,45 +197,26 @@ if (unavailable.size) {
 lines.push("");
 
 const docPath = path.join(repoRoot, "docs", "servercapabilities.md");
-let output = lines.join("\n");
+const fresh = lines.join("\n");
 
-// #390 partial-doc merge guard: this host (esp. the ubuntu nightly) lacks many
-// toolchains, so servers it couldn't spawn are absent from `rows` and would DROP
-// from the capability table on a naive overwrite. Merge the freshly-measured
-// rows over the PRIOR doc's table so a server we didn't capture this run keeps
-// its last-known row (never regress the server-row count). Only the servers we
-// measured are updated; the rest are preserved verbatim.
+// #390/#469 partial-doc merge guard: this host (esp. the ubuntu nightly) lacks
+// many toolchains, so servers it couldn't spawn are absent from `rows` and
+// would DROP from the doc on a naive overwrite. mergeServerCapabilitiesDoc
+// (pure, tested in tests/scripts/server-capabilities-merge.test.ts) merges the
+// prior doc's rows/bullets for servers this run didn't capture into the fresh
+// doc — schema-tolerant (a column added this run, like ws-pull, no longer
+// silently disables the whole guard — #469) and also carries over the two
+// bullet sections, which the original guard didn't touch at all.
+let output = fresh;
 try {
 	if (fs.existsSync(docPath)) {
 		const prior = fs.readFileSync(docPath, "utf8");
-		const marker = "| server | mode | ws-pull |";
-		const priorTbl = parseTable(prior, marker);
-		const newTbl = parseTable(output, marker);
-		if (priorTbl && newTbl && priorTbl.header.join("|") === newTbl.header.join("|")) {
-			const keyIdx = newTbl.header.indexOf("server");
-			// Treat every freshly-rendered row as an object keyed by header name.
-			const measured = newTbl.rows.map((cells) => {
-				const o = {};
-				newTbl.header.forEach((h, i) => (o[h] = cells[i]));
-				return o;
-			});
-			const merged = mergeRows(
-				priorTbl.rows,
-				priorTbl.header,
-				measured,
-				"server",
-				newTbl.header, // this run is authoritative for every column of a row it measured
+		const { text: merged, preservedCount } = mergeServerCapabilitiesDoc(prior, fresh);
+		output = merged;
+		if (preservedCount > 0) {
+			console.error(
+				`merge guard: preserved ${preservedCount} prior server row(s)/bullet(s) not captured this run.`,
 			);
-			const mergedText = replaceTable(output, marker, newTbl.header, newTbl.sep, merged);
-			if (mergedText) {
-				output = mergedText;
-				const preserved = priorTbl.rows.filter(
-					(c) => !newTbl.rows.some((n) => n[keyIdx] === c[keyIdx]),
-				).length;
-				console.error(
-					`merge guard: preserved ${preserved} prior server row(s) not captured this run.`,
-				);
-			}
 		}
 	}
 } catch (e) {
