@@ -10,6 +10,8 @@ All notable changes to pi-lens will be documented in this file.
 
 ### Fixed
 
+- **pi-lens loads under pi's Bun-compiled binary again** (#335) — pi ships as a `bun build --compile` single-file executable and loads extensions inside that embedded runtime, whose module resolver does not traverse the extension's on-disk `node_modules` for a bare specifier. So a static `import { minimatch } from "minimatch"` in `file-utils.js` (and every other third-party bare import) failed with `Cannot find package`, dropping the jscpd/todo/complexity analyzers into degraded mode. `dist/index.js` is now bundled into one self-contained file (`scripts/bundle-dist.mjs`, wired into `build:dist`) that inlines the pure-JS deps (minimatch, js-yaml, vscode-jsonrpc and transitives), so nothing is imported by bare specifier at load time. Host-provided packages (typebox, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`) and the native/wasm packages (`@ast-grep/napi`, web-tree-sitter) stay external; the two lazy native/wasm accessors resolve to an absolute path via `createRequire` before dynamic-importing (a bare specifier fails under the compiled host, an absolute path does not), with the bare specifier kept as a fallback for other runtimes. esbuild is run through `node <npm-cli> exec` (shell-free, not the `npx.cmd` shim), installing into npm's cache rather than the project tree, so the build adds no dependency and works on a from-source `--omit=dev` install; a `createRequire` banner is prepended so the bundled CJS deps load under pure-ESM Node. The reporter's Windows junction workaround does not port to the Linux compiled host, so bundling is the cross-platform fix.
+
 ## [3.8.67] - 2026-07-09
 
 ### Added
